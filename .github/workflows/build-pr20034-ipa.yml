@@ -1,0 +1,58 @@
+name: Build RetroArch PR 20034 IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-latest # $0 on public repositories
+
+    steps:
+      - name: Checkout RetroArch master
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Pull in PR #20034 (Scene window render sizing)
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git fetch https://github.com/libretro/RetroArch.git pull/20034/head:scene-window-pr
+          git merge scene-window-pr --no-edit
+
+      - name: Download pre-built iOS ARM64 cores
+        run: |
+          mkdir -p pkg/apple/iOS/modules
+          cd pkg/apple/iOS/modules
+          curl -s https://buildbot.libretro.com/nightly/apple/ios-arm64/latest/ \
+            | grep -oE 'href="[^"]+_libretro_ios\.dylib\.zip"' \
+            | sed 's/href="//;s/"//' \
+            | sort -u \
+            | xargs -n 1 -P 8 -I {} curl -sO "https://buildbot.libretro.com/nightly/apple/ios-arm64/latest/{}"
+          unzip -o "*.zip"
+          rm -f *.zip
+
+      - name: Build RetroArch (Unsigned)
+        run: |
+          xcodebuild \
+            -project pkg/apple/RetroArch_iOS13.xcodeproj \
+            -scheme "RetroArch iOS Release" \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package into unsigned IPA
+        run: |
+          mkdir -p Payload
+          cp -r "build/Build/Products/Release-iphoneos/RetroArch.app" Payload/
+          zip -qry RetroArch-PR20034.ipa Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RetroArch-PR20034
+          path: RetroArch-PR20034.ipa
